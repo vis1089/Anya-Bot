@@ -14,3 +14,4 @@ Pillow
 opencv-python
 pytesseract
 pypresence==4.2.0
+discord.ui
