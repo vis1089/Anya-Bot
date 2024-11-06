@@ -16,8 +16,8 @@ from discord.ext.commands.converter import (
     ColorConverter, EmojiConverter, MemberConverter, RoleConverter, TextChannelConverter
 )
 
-from discord.ui import Select, View, Button
-from discord.utils import get
+from discord.ext import commands
+from discord_components import DiscordComponents, Button, Select, SelectOption, ButtonStyle
 
 
 # Discord Slash Commands
