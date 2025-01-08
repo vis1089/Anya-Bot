@@ -161,4 +161,4 @@ async def main():
 
 
     asyncio.run(start_http_server())
-    asyncio.run(main())
+    bot.run(os.environ['DISCORD_TOKEN'])
