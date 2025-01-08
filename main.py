@@ -33,22 +33,6 @@ class BotSetup(commands.AutoShardedBot):
     async def on_ready(self):
         print(f"\033[92mLogged in as {self.user} (ID: {self.user.id})\033[0m")
 
-    async def get_token_from_db(self):
-        mongo_url = os.getenv('MONGO_URI')
-        if not mongo_url:
-            raise ValueError("No MONGO_URI found in environment variables")
-        try:
-            client = AsyncIOMotorClient(mongo_url)
-            db = client[self.DB_NAME]
-            collection = db[self.COLLECTION_NAME]
-            token_data = await collection.find_one({self.token_type: {"$exists": True}})
-            if token_data:
-                return token_data.get(self.token_type)
-            else:
-                raise ValueError("No token found in the database")
-        except ConfigurationError as e:
-            logger.error(f"MongoDB Configuration Error: {e}")
-            raise
 
     async def start_bot(self):
         await self.setup()
