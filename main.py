@@ -1,32 +1,17 @@
 import os
-import sys
-import subprocess
-import traceback
 import asyncio
-import requests
 from aiohttp import web
-
-import pymongo
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import ConfigurationError
-
-TOKEN = os.getenv("DISCORD_TOKEN")
-
-# Print loaded environment variables
-print("\033[93mLoaded Environment Variables:\033[0m")
-
-for key, value in os.environ.items():
-    if key.startswith("TOKEN") or key.startswith("PASSWORD") or key.startswith("SECRET"):
-        print(f"{key} = [REDACTED]")
-    else:
-        print(f"{key} = {value}")
+from discord.ext import commands
+import discord
+import traceback
 
 # Custom Imports
 from Imports.depend_imports import *
 from Imports.discord_imports import *
 from Imports.log_imports import logger
 from Cogs.pokemon import PokemonPredictor
-
 
 class BotSetup(commands.AutoShardedBot):
     def __init__(self):
@@ -38,56 +23,45 @@ class BotSetup(commands.AutoShardedBot):
             intents=intents,
             help_command=None,
             shard_count=1,
-            shard_reconnect_interval=10
+            shard_reconnect_interval=10,
         )
         self.mongoConnect = None
         self.DB_NAME = 'Bot'
         self.COLLECTION_NAME = 'information'
         self.token_type = "Token"
-        
 
     async def on_ready(self):
         print(f"\033[92mLogged in as {self.user} (ID: {self.user.id})\033[0m")
 
     async def get_token_from_db(self):
-        mongo_url = os.getenv('MONGO_URI')  
+        mongo_url = os.getenv('MONGO_URI')
         if not mongo_url:
             raise ValueError("No MONGO_URI found in environment variables")
-
-        client = AsyncIOMotorClient(mongo_url)
-        db = client[self.DB_NAME]
-        collection = db[self.COLLECTION_NAME]
-
-        token_data = await collection.find_one({self.token_type: {"$exists": True}})
-        
-        if token_data:
-            return token_data.get(self.token_type)
-        else:
-            raise ValueError("No token found in the database")
+        try:
+            client = AsyncIOMotorClient(mongo_url)
+            db = client[self.DB_NAME]
+            collection = db[self.COLLECTION_NAME]
+            token_data = await collection.find_one({self.token_type: {"$exists": True}})
+            if token_data:
+                return token_data.get(self.token_type)
+            else:
+                raise ValueError("No token found in the database")
+        except ConfigurationError as e:
+            logger.error(f"MongoDB Configuration Error: {e}")
+            raise
 
     async def start_bot(self):
         await self.setup()
         token = await self.get_token_from_db()
-        
         if not token:
             logger.error("No token found. Please check the database.")
             return
-        
-        # Set the token in the environment for use
-        os.environ["TOKEN"] = token  # Correct way to set an environment variable
-        
         try:
             await self.start(token)
         except KeyboardInterrupt:
             await self.close()
         except Exception as e:
             logger.error(f"An error occurred while logging in: {e}\n{traceback.format_exc()}")
-            await self.close()
-        finally:
-            if self.is_closed():
-                print("Bot is closed, cleaning up.")
-            else:
-                print("Bot is still running.")
             await self.close()
 
     async def setup(self):
@@ -98,34 +72,46 @@ class BotSetup(commands.AutoShardedBot):
         print("\n\033[94m===== Setup Completed =====\033[0m")
 
     async def import_cogs(self, dir_name):
-        
         for filename in os.listdir(dir_name):
             if filename.endswith(".py"):
-                print(f"\033[94m|   ├── {filename}\033[0m")
-                module = __import__(f"{dir_name}.{os.path.splitext(filename)[0]}", fromlist=[""])
-                for obj_name in dir(module):
-                    obj = getattr(module, obj_name)
-                    if isinstance(obj, commands.CogMeta):
-                        if not self.get_cog(obj_name):
-                            await self.add_cog(obj(self))
-                            print(f"\033[92m|   |   └── {obj_name}\033[0m")
+                try:
+                    print(f"\033[94m|   ├── {filename}\033[0m")
+                    module = __import__(f"{dir_name}.{os.path.splitext(filename)[0]}", fromlist=[""])
+                    for obj_name in dir(module):
+                        obj = getattr(module, obj_name)
+                        if isinstance(obj, commands.CogMeta):
+                            if not self.get_cog(obj_name):
+                                await self.add_cog(obj(self))
+                                print(f"\033[92m|   |   └── {obj_name}\033[0m")
+                except Exception as e:
+                    logger.error(f"Failed to load cog {filename}: {e}")
+                    print(f"\033[91m|   ├── Failed to load {filename}: {e}\033[0m")
+
+    async def close(self):
+        if self.mongoConnect:
+            self.mongoConnect.close()
+            print("MongoDB connection closed.")
+        await super().close()
+
 
 async def check_rate_limit():
     url = "https://discord.com/api/v10/users/@me"
-    token = await BotSetup().get_token_from_db()  # Get token from DB
-    headers = {
-        "Authorization": f"Bot {token}"
-    }
-    response = requests.get(url, headers=headers)
-    if response.status_code == 200:
-        remaining_requests = int(response.headers.get("X-RateLimit-Remaining", 1))
-        rate_limit_reset_after = float(response.headers.get("X-RateLimit-Reset-After", 0))
-        if remaining_requests <= 0:
-            logger.error(f"Rate limit exceeded. Retry after {rate_limit_reset_after} seconds.")
-            print(f"Rate limit exceeded. Please wait for {rate_limit_reset_after} seconds before retrying.")
-            await asyncio.sleep(rate_limit_reset_after)
-    else:
-        logger.error(f"Failed to check rate limit. Status code: {response.status_code}")
+    bot = BotSetup()
+    token = await bot.get_token_from_db()
+    headers = {"Authorization": f"Bot {token}"}
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=headers) as response:
+            if response.status == 200:
+                remaining_requests = int(response.headers.get("X-RateLimit-Remaining", 1))
+                rate_limit_reset_after = float(response.headers.get("X-RateLimit-Reset-After", 0))
+                if remaining_requests <= 0:
+                    logger.error(f"Rate limit exceeded. Retry after {rate_limit_reset_after} seconds.")
+                    print(f"Rate limit exceeded. Please wait for {rate_limit_reset_after} seconds before retrying.")
+                    await asyncio.sleep(rate_limit_reset_after)
+            else:
+                logger.error(f"Failed to check rate limit. Status code: {response.status}")
+
 
 async def start_http_server():
     try:
@@ -141,24 +127,18 @@ async def start_http_server():
         logger.error(f"Failed to start HTTP server: {e}")
         print("Failed to start HTTP server.")
 
+
 async def main():
     bot = BotSetup()
     try:
+        asyncio.create_task(start_http_server())
         await check_rate_limit()
         await bot.start_bot()
-    except discord.HTTPException as e:
-        if e.status == 429:
-            retry_after = int(e.response.headers.get("Retry-After", 0))
-            logger.error(f"Rate limit exceeded. Retry after {retry_after} seconds.")
-            print(f"Rate limit exceeded. Please wait for {retry_after} seconds before retrying.")
-            await asyncio.sleep(retry_after)
-        else:
-            logger.error(f"An error occurred: {e}\n{traceback.format_exc()}")
     except Exception as e:
         logger.error(f"An error occurred: {e}\n{traceback.format_exc()}")
     finally:
         await bot.close()
 
 
-    asyncio.run(start_http_server())
-    bot.run(os.environ['DISCORD_TOKEN'])
+if __name__ == "__main__":
+    asyncio.run(main())
