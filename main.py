@@ -10,7 +10,7 @@ import pymongo
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import ConfigurationError
 
-
+TOKEN = os.getenv("DISCORD_TOKEN")
 
 # Print loaded environment variables
 print("\033[93mLoaded Environment Variables:\033[0m")
@@ -159,7 +159,6 @@ async def main():
     finally:
         await bot.close()
 
-if __name__ == "__main__":
-    load_dotenv(dotenv_path=os.path.join('.github', '.env'))
+
     asyncio.run(start_http_server())
     asyncio.run(main())
